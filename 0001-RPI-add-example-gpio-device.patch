@@ -1,0 +1,30 @@
+From a7a9bc1c982e1330253309eaae3b5c4bbd7ed481 Mon Sep 17 00:00:00 2001
+From: Mike Krinkin <krinkin.m.u@gmail.com>
+Date: Wed, 6 Apr 2016 18:28:12 +0300
+Subject: [PATCH] RPI: add example gpio device
+
+Signed-off-by: Mike Krinkin <krinkin.m.u@gmail.com>
+---
+ arch/arm/boot/dts/bcm2835-rpi-b.dts | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/arch/arm/boot/dts/bcm2835-rpi-b.dts b/arch/arm/boot/dts/bcm2835-rpi-b.dts
+index 4859e9d..cecabd2 100644
+--- a/arch/arm/boot/dts/bcm2835-rpi-b.dts
++++ b/arch/arm/boot/dts/bcm2835-rpi-b.dts
+@@ -11,6 +11,12 @@
+ 			gpios = <&gpio 16 1>;
+ 		};
+ 	};
++
++	/* Our device name is 'example', and we request GPIO20 as 'out' gpio. */
++	example {
++		compatible = "spbau,example";
++		out-gpios = <&gpio 24 0>;
++	};
+ };
+ 
+ &gpio {
+-- 
+1.9.1
+

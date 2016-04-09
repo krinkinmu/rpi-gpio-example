@@ -1,0 +1,145 @@
+\section{Сборка и установка upstream ядра}
+
+Теперь мы хотим поставить на наш Raspberry PI upstream\footnote{Так же
+известное как ванильное ядро.} ядро. Вместе с ядром мы также поставим и новый
+загрузчик - u-boot.
+
+Для начала нам нужно скачать все нужные части. Начнем с компилятора и
+сопутствующих утилит\footnote{То что называется toolchain.}. Репозиторий с
+набором утилит располагается на github.com оттуда и возьмем:
+\begin{lstlisting}
+git clone git://github.com/raspberrypi/tools.git --depth=1
+\end{lstlisting}\footnote{Флаг \-\-depth=1 позволяет выкачать только последнюю
+версию и не качать всю историю изменений.}
+
+Собирать утилиты не нужно, в репозитории находятся сразу готовые бинарные файлы.
+
+Далее нам нужно выкачать исходники загрузчика:
+\begin{lstlisting}
+git clone git://git.denx.de/u-boot.git --depth=1
+\end{lstlisting}
+
+Конечно, нам понядобятся исходники ядра Linux:
+\begin{lstlisting}
+git clone git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git --depth=1
+\end{lstlisting}
+
+Наконец нам понадобятся части прошивки Raspberry PI, которые запустят загрузчик,
+который, в свою очередь, запустит ядро Linux\footnote{В Raspberry PI первым
+запускается "виде процессор" (Video Core), на котором работает своя
+проприетарная ОС, и уже Video Core запускает все остальное, включая наш
+загрузчик.}:
+\begin{lstlisting}
+git clone git@github.com:raspberrypi/firmware.git --depth=1
+\end{lstlisting}
+
+\subsection{Сборка}
+
+Перед сборкой нам нужно немного настроить наше окружение, а именно нам нужно
+экспортировать некоторые переменные окружения, которые нужны для сборки
+исходных кодов:
+\begin{lstlisting}
+export KERNEL_SRC=`pwd`/linux
+export CCPREFIX=`pwd`/tools/arm-bcm2708/arm-bcm2708hardfp-linux-gnueabi/bin/arm-bcm2708hardfp-linux-gnueabi-
+export ARCH=arm
+export CROSS_COMPILE=${CCPREFIX}
+\end{lstlisting}
+
+Все это легко можно вынести в скрипт, например, \emph{export.sh}, но чтобы этот
+скрипт сделал то, что от него ожидается, его нужно запускать особенным образом
+\footnote{В противном случае запуск скрипта породит новый процесс, в котором
+будут добавлены переменные окружения, но родительский процесс так и останется
+без этих переменных.}:
+\begin{lstlisting}
+source ./export.sh
+\end{lstlisting}
+
+Теперь мы готовы собрать ядро Linux:
+\begin{lstlisting}
+cd linux
+make bcm2835_defconfig
+make -j `grep -c ^processor /proc/cpuinfo`
+cd ..
+\end{lstlisting}
+
+А также наш загрузчик - u-boot:
+\begin{lstlisting}
+cd u-boot
+make rpi_config
+make -j `grep -c ^processor /proc/cpuinfo`
+cd ..
+\end{lstlisting}
+
+Загрузчику нужен конфигурационный файл, который описывает что и как нужно
+загрузить. Чтобы подготовить такой файл перейдем в каталог загрузчика:
+\begin{lstlisting}
+cd u-boot/tools
+\end{lstlisting}
+
+Теперь нам нужно, собственно, создать конфигурационный файл для нашего
+загрузчика - назовем его \emph{boot.scr}. Его содержимое может быть непонятно,
+но очень вряд ли вам в ближайшее время придется что-то в нем менять, поэтому это
+не очень страшно - просто будьте внимательны при переписывании:
+\begin{lstlisting}
+mmc dev 0
+setenv fdtfile bcm2835-rpi-b.dtb
+setenv bootargs earlyprintk console=tty0 console=ttyAMA0 root=/dev/mmcblk0p2 rootwait
+fatload mmc 0:1 ${kernel_addr_r} zImage
+fatload mmc 0:1 ${fdt_addr_r} ${fdtfile}
+bootz ${kernel_addr_r} - ${fdt_addr_r}
+\end{lstlisting}
+
+Если кратко, то этот файл описывает:
+\begin{itemize}
+  \item где взять образ ядра Linux;
+  \item где взять Device Tree Blob (к этому мы еще вернемся);
+  \item куда все это нужно положить в памяти;
+  \item какие параметры передать ядру Linux при загрузке;
+\end{itemize}
+
+Ну и наконец, этому файлу требуется еще кое-какая обработка\footnote{Это особенности
+u-boot, которые нас не особо интересуют.}:
+\begin{lstlisting}
+./mkimage -A arm -O linux -T script -C none -n boot.scr -d boot.scr boot.scr.uimg
+\end{lstlisting}
+
+На выходе мы получаем файл \emph{boot.scr.uimg}, его нам нужно будет скопировать
+в раздел \emph{boot} нашей карты памяти вместе с ядром Linux и прочими вещами -
+мы покажем все это чуть дальше.
+
+\subsection{Установка}
+
+Не забываем вернуться назад в корень нашего рабочего каталога:
+\begin{lstlisting}
+cd ../..
+\end{lstlisting}
+
+Нам нужно записать все что мы подготовили в раздел \emph{boot} нашей карты
+памяти. Но предварительно сохраним то, что там было раньше. Допустим что раздел
+\emph{boot} примонтирован в системе в каталоге \emph{/media/boot}, тогда нужно
+сделать следующее:
+\begin{lstlisting}
+mkdir /media/boot/backup
+mv /media/boot/* /media/boot/backup
+\end{lstlisting}
+
+Наконец, теперь мы можем скопировать в \emph{boot} то, что мы хотим там видеть:
+\begin{lstlisting}
+cp -R firmware/boot/* /media/boot
+cp u-boot/u-boot.bin /media/boot/kernel.img
+cp linux/arch/arm/boot/zImage /media/boot
+cp linux/arch/arm/boot/dts/bcm2835-rpi-b.dtb /media/boot
+cp u-boot/tools/boot.scr.uimg /media/boot
+\end{lstlisting}
+
+Собственно, скопировали мы в \emph{boot} следующие вещи:
+\begin{itemize}
+  \item прошивку Raspberry PI (содержимое \emph{firmware/boot});
+  \item загрузчик u-boot (в \emph{boot} он называется \emph{kernel.img});
+  \item скомпилированное ядрое Linux (\emph{zImage});
+  \item Device Tree Blob (\emph{bcm2835-rpi-b.dtb});
+  \item конфигурационный файл u-boot (\emph{boot.scr.uimg});
+\end{itemize}
+
+На этом мы закончили с установкой upstream ядра Linux на Raspberry PI. Если все
+прошло удачно, вы можете загрузить Raspberry PI, но уже с новым ядром.
